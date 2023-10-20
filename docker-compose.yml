@@ -2,6 +2,7 @@ version: "3.8"
 
 services:
   pihole:
+    container_name: homelab_nginx
     image: nginx
     ports:
       - 80:80/tcp
