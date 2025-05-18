@@ -1,9 +1,7 @@
-version: "3.8"
-
 services:
   pihole:
-    container_name: homelab_nginx
     image: nginx
+    container_name: nginx
     ports:
       - 80:80/tcp
     volumes:
