@@ -1,0 +1,125 @@
+worker_processes {{ cpus }};
+
+events { worker_connections 1024; }
+
+http {
+
+    log_format json escape=json '{'
+        '"time":"$time_iso8601",'
+        '"host":"$host",'
+        '"remote_addr":"$remote_addr",'
+        '"method":"$request_method",'
+        '"uri":"$request_uri",'
+        '"status":$status,'
+        '"size":$body_bytes_sent,'
+        '"referer":"$http_referer",'
+        '"user_agent":"$http_user_agent",'
+        '"scheme":"$scheme",'
+        '"protocol":"$server_protocol"'
+    '}';
+
+    log_format sinkhole escape=json '{'
+        '"time":"$time_iso8601",'
+        '"host":"$http_sinkhole_host",'
+        '"remote_addr":"$http_sinkhole_remote_addr",'
+        '"method":"$request_method",'
+        '"uri":"$request_uri",'
+        '"status":$status,'
+        '"size":$body_bytes_sent,'
+        '"referer":"$http_referer",'
+        '"user_agent":"$http_user_agent",'
+        '"scheme":"$http_sinkhole_scheme",'
+        '"protocol":"$http_sinkhole_protocol",'
+        '"body":"$request_body"'
+    '}';
+
+    access_log /dev/stdout json;
+
+    sendfile on;
+    server_tokens off;
+    client_max_body_size 0;
+
+    resolver {{ dns_server }} valid=5s;
+
+    add_header Alt-Svc 'h3=":443"; ma=86400';
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+
+    ssl_prefer_server_ciphers on;
+    ssl_early_data on;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_certificate /etc/nginx/ssl/{{ tld }}/full.pem;
+    ssl_certificate_key /etc/nginx/ssl/{{ tld }}/key.pem;
+
+    map $http_upgrade $connection_upgrade_keepalive {
+        default upgrade;
+        ''      '';
+    }
+
+    gzip on;
+    http2 on;
+    http3 on;
+    http3_hq on;
+    quic_retry on;
+    quic_gso on;
+
+    proxy_pass_header Authorization;
+    proxy_buffers 128 8k;
+    proxy_buffer_size 256k;
+    proxy_buffering off;
+    proxy_request_buffering off;
+    proxy_ssl_verify off;
+    proxy_ssl_protocols TLSv1.2 TLSv1.3;
+
+    server {
+        listen 8888;
+        listen [::]:8888;
+
+        location / {
+            access_log /dev/stdout sinkhole;
+            proxy_pass http://localhost:$server_port/dummy;
+        }
+
+        location /dummy {
+            access_log off;
+            return 403;
+        }
+    }
+
+    server {
+        listen 80;
+        listen [::]:80;
+
+        location / {
+            set $sinkhole "http://localhost:8888/";
+            proxy_set_header Sinkhole-Scheme http;
+            proxy_set_header Sinkhole-Host $host;
+            proxy_set_header Sinkhole-Remote-Addr $remote_addr;
+            proxy_set_header Sinkhole-Protocol $server_protocol;
+
+            if ($http_host !~* ^([^\.]+\.kryesh.tech)$ ) {
+                access_log off;
+                proxy_pass $sinkhole;
+                break;
+            }
+            return 301 https://$host$request_uri;
+        }
+    }
+
+    include /etc/nginx/conf.d/*.conf;
+
+    server {
+        listen 443 default_server quic reuseport;
+        listen 443 default_server ssl;
+        listen [::]:443 default_server ssl;
+        listen [::]:443 default_server quic reuseport;
+
+        location / {
+            access_log off;
+            proxy_set_header Sinkhole-Scheme https;
+            proxy_set_header Sinkhole-Host $host;
+            proxy_set_header Sinkhole-Remote-Addr $remote_addr;
+            proxy_set_header Sinkhole-Protocol $server_protocol;
+            proxy_pass http://localhost:8888/;
+        }
+    }
+}

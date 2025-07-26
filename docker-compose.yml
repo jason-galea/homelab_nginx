@@ -1,5 +1,5 @@
 services:
-  pihole:
+  nginx:
     image: nginx
     container_name: nginx
     ports:
